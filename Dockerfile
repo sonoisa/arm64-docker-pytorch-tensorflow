@@ -325,6 +325,10 @@ COPY patches/tf2-armpl.patch $PACKAGE_DIR/tf2-armpl.patch
 COPY patches/tf2-openblas.patch $PACKAGE_DIR/tf2-openblas.patch
 RUN $PACKAGE_DIR/build-tensorflow.sh
 
+# Build tensorflow-text
+COPY scripts/build-tensorflow-text.sh $PACKAGE_DIR/.
+RUN $PACKAGE_DIR/build-tensorflow-text.sh
+
 RUN rm -rf $PACKAGE_DIR/bazel
 
 CMD ["bash", "-l"]
