@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # *******************************************************************************
-# Copyright 2020 Arm Limited and affiliates.
+# Copyright 2020-2021 Arm Limited and affiliates.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,90 +22,95 @@ set -euo pipefail
 cd $PACKAGE_DIR
 readonly package=tensorflow-text
 readonly version=$TF_VERSION
-readonly tf_id=$TF_VERSION_ID
 readonly src_host=https://github.com/tensorflow
 readonly src_repo=text
 
-# Clone tensorflow-text
+# Clone tensorflow and benchmarks
 git clone ${src_host}/${src_repo}.git
 cd ${src_repo}
 git checkout $version -b $version
-
+git submodule sync
+git submodule update --init --recursive
 
 # Env vars used to avoid interactive elements of the build.
 export HOST_C_COMPILER=(which gcc)
 export HOST_CXX_COMPILER=(which g++)
 export PYTHON_BIN_PATH=(which python)
 export USE_DEFAULT_PYTHON_LIB_PATH=1
-export CC_OPT_FLAGS=""
 export TF_ENABLE_XLA=0
+export TF_DOWNLOAD_CLANG=0
+export TF_SET_ANDROID_WORKSPACE=0
+export TF_NEED_MPI=0
+export TF_NEED_ROCM=0
 export TF_NEED_GCP=0
 export TF_NEED_S3=0
 export TF_NEED_OPENCL_SYCL=0
 export TF_NEED_CUDA=0
-export TF_DOWNLOAD_CLANG=0
-export TF_NEED_MPI=0
-export TF_SET_ANDROID_WORKSPACE=0
-export TF_NEED_ROCM=0
+export TF_NEED_HDFS=0
+export TF_NEED_OPENCL=0
+export TF_NEED_JEMALLOC=1
+export TF_NEED_VERBS=0
+export TF_NEED_AWS=0
+export TF_NEED_GDR=0
+export TF_NEED_OPENCL_SYCL=0
+export TF_NEED_COMPUTECPP=0
+export TF_NEED_KAFKA=0
+export TF_NEED_TENSORRT=0
 
 ./oss_scripts/configure.sh
 
-extra_args=""
 host_args=""
+extra_args="--verbose_failures -s"
 if [[ $BZL_RAM ]]; then extra_args="$extra_args --local_ram_resources=$BZL_RAM"; fi
 if [[ $BZL_RAM ]]; then host_args="--host_jvm_args=-Xmx${BZL_RAM}m --host_jvm_args=-Xms${BZL_RAM}m"; fi
 if [[ $NP_MAKE ]]; then extra_args="$extra_args --jobs=$NP_MAKE"; fi
 
 if [[ $TF_ONEDNN_BUILD ]]; then
-   echo "$TF_ONEDNN_BUILD build for $TF_VERSION"
-   if [[ $tf_id == '1' ]]; then
-      bazel $host_args build $extra_args \
-         --verbose_failures \
-         --define=build_with_mkl_dnn_only=true --define=build_with_mkl=true \
-         --define=tensorflow_mkldnn_contraction_kernel=1 \
-         --copt="-mtune=${CPU}" --copt="-march=armv8-a" --copt="-moutline-atomics" \
-         --cxxopt="-mtune=${CPU}" --cxxopt="-march=armv8-a" --cxxopt="-moutline-atomics" \
-         --linkopt="-L$ARMPL_DIR/lib -lamath -lm" --linkopt="-fopenmp" \
-         --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0" \
-         --enable_runfiles oss_scripts/pip_package:build_pip_package
-   elif [[ $tf_id == '2' ]]; then
-      bazel $host_args build $extra_args \
-         --verbose_failures \
-         --config=mkl_opensource_only \
-         --copt="-mcpu=${CPU}" --copt="-flax-vector-conversions" --copt="-moutline-atomics" --copt="-O3" \
-         --cxxopt="-mcpu=${CPU}" --cxxopt="-flax-vector-conversions" --cxxopt="-moutline-atomics" --cxxopt="-O3" \
-         --linkopt="-L$ARMPL_DIR/lib -lamath -lm" --linkopt="-fopenmp" \
-         --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0" \
-         --enable_runfiles oss_scripts/pip_package:build_pip_package
-   else
-      echo 'Invalid TensorFlow version when building tensorflow'
-      exit 1
-   fi
+    echo "$TF_ONEDNN_BUILD build for $TF_VERSION"
+    # extra_args="$extra_args --config=mkl_aarch64 --linkopt=-fopenmp"
+    extra_args="$extra_args --define=build_with_mkl_dnn_only=true --define=build_with_mkl=true \
+         --define=tensorflow_mkldnn_contraction_kernel=1 --linkopt=-fopenmp"
+    if [[ $TF_ONEDNN_BUILD == 'reference' ]]; then
+      echo "TensorFlow-text $TF_VERSION with oneDNN backend - reference build."
+    elif [[ $TF_ONEDNN_BUILD == 'acl' ]]; then
+      echo "TensorFlow-text $TF_VERSION with oneDNN backend - Compute Library build."
+    fi
 else
-   echo "Eigen-only build for $TF_VERSION"
-   bazel $host_args build $extra_args \
-      --verbose_failures \
-      --define tensorflow_mkldnn_contraction_kernel=0 \
-      --copt="-mcpu=${CPU}" --copt="-flax-vector-conversions" --copt="-moutline-atomics" --copt="-O3" \
-      --cxxopt="-mcpu=${CPU}" --cxxopt="-flax-vector-conversions" --cxxopt="-moutline-atomics" --cxxopt="-O3" \
-      --linkopt="-L$ARMPL_DIR/lib -lamath -lm" \
-      --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0" \
-      --enable_runfiles oss_scripts/pip_package:build_pip_package
-fi
-./bazel-bin/oss_scripts/pip_package/build_pip_package ./wheel-TFT$TF_VERSION-py$PY_VERSION-$CC
+    echo "TensorFlow $TF_VERSION with Eigen backend."
+    extra_args="$extra_args --define tensorflow_mkldnn_contraction_kernel=0"
 
+    # Manually set L1,2,3 caches sizes for the GEBP kernel in Eigen.
+    [[ $EIGEN_L1_CACHE ]] && extra_args="$extra_args \
+      --cxxopt=-DEIGEN_DEFAULT_L1_CACHE_SIZE=${EIGEN_L1_CACHE} \
+      --copt=-DEIGEN_DEFAULT_L1_CACHE_SIZE=${EIGEN_L1_CACHE}"
+    [[ $EIGEN_L2_CACHE ]] && extra_args="$extra_args \
+      --cxxopt=-DEIGEN_DEFAULT_L2_CACHE_SIZE=${EIGEN_L2_CACHE} \
+      --copt=-DEIGEN_DEFAULT_L2_CACHE_SIZE=${EIGEN_L2_CACHE}"
+    [[ $EIGEN_L3_CACHE ]] && extra_args="$extra_args \
+      --cxxopt=-DEIGEN_DEFAULT_L3_CACHE_SIZE=${EIGEN_L3_CACHE} \
+      --copt=-DEIGEN_DEFAULT_L3_CACHE_SIZE=${EIGEN_L3_CACHE}"
+fi
+
+# Build the tensorflow configuration
+bazel $host_args build $extra_args \
+        --copt="-mcpu=${CPU}" --copt="-march=${ARCH}" --copt="-O3"  --copt="-fopenmp" \
+        --cxxopt="-mcpu=${CPU}" --cxxopt="-march=${ARCH}" --cxxopt="-O3"  --cxxopt="-fopenmp" \
+        --linkopt="-lgomp  -lm" \
+        --enable_runfiles \
+        oss_scripts/pip_package:build_pip_package
+
+# Install Tensorflow-text python package via pip
+./bazel-bin/oss_scripts/pip_package/build_pip_package ./wheel-TFT$TF_VERSION-py$PY_VERSION-$CC
 pip install $(ls -tr wheel-TFT$TF_VERSION-py$PY_VERSION-$CC/*.whl | tail)
 
-# Check the installation was sucessfull
+# Check the Python installation was sucessfull
 cd $HOME
-
-# if python -c 'import tensorflow_text; print(tensorflow_text.__version__)' > version.log; then
-#    echo "TensorFlow-text $(cat version.log) package installed from $TF_VERSION branch."
-# else
-#    echo "TensorFlow-text package installation failed."
-#    exit 1
-# fi
-#
-# rm $HOME/version.log
+if python -c 'import tensorflow_text; print(tensorflow_text.__version__)' > version.log; then
+    echo "TensorFlow-text $(cat version.log) package installed from $TF_VERSION branch."
+else
+    echo "TensorFlow-text Python package installation failed."
+    exit 1
+fi
+rm $HOME/version.log
 
 rm -rf $PACKAGE_DIR/${src_repo}

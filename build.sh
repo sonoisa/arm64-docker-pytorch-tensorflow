@@ -29,13 +29,12 @@ function print_usage_and_exit {
   echo "  -h, --help                   Display this message"
   echo "      --jobs                   Specify number of jobs to run in parallel during the build"
   echo "      --bazel_memory_limit     Set a memory limit (MB) for Bazel build (default: 2048)."
-  echo "      --pt_onednn              Build and link to oneDNN / DNNL:"
+  echo "      --pt_onednn              Build and link to oneDNN / DNNL on PyTorch:"
   echo "                                 * reference    - use the C++ reference kernels throughout."
-  echo "                                 * acl          - use Arm Compute Library primitives where available (default)."
-  echo "      --tf_onednn              Build and link to oneDNN / DNNL:"
+  echo "                                 * acl          - use Arm Compute Library (default)."
+  echo "      --tf_onednn              Build and link to oneDNN / DNNL on TensorFlow:"
   echo "                                 * reference    - use the C++ reference kernels throughout."
-  echo "                                 * openblas     - use OpenBLAS for BLAS calls."
-  echo "                                 * armpl        - use Arm Performance Libraries for BLAS calls (default)."
+  echo "                                 * acl          - use Arm Compute Library (default)."
   echo "      --build-type             Type of build to perform:"
   echo "                                 * base         - build the basic portion of the image, OS and essential packages"
   echo "                                 * libs         - build image including maths libraries and Python3."
@@ -80,10 +79,9 @@ extra_args=""
 nproc_build=
 bazel_mem="2048"
 pt_onednn="acl"
-tf_onednn=
+tf_onednn="acl"
 pt_onednn_blas="acl"
-tf_onednn_blas="armpl"
-tf_version="2"
+tf_onednn_blas="acl"
 target="native"
 clean_build=
 
@@ -188,12 +186,8 @@ do
           tf_onednn="reference"
           shift
           ;;
-        openblas )
-          tf_onednn="openblas"
-          shift
-          ;;
-        armpl )
-          tf_onednn="armpl"
+        acl )
+          tf_onednn="acl"
           shift
           ;;
         * )
@@ -234,7 +228,7 @@ fi
 
 # Add oneDNN build options
 if [[ $tf_onednn ]]; then
-  extra_args="$extra_args --build-arg tf_onednn_opt=$tf_onednn"
+  extra_args="--build-arg tf_onednn_opt=$tf_onednn $extra_args"
 fi
 
 if [[ $clean_build ]]; then
@@ -242,24 +236,30 @@ if [[ $clean_build ]]; then
   extra_args="--pull --no-cache $extra_args"
 fi
 
-# Set TensorFlow, bazel and oneDNN version
-tf_version="2"
-version="v2.3.0"
-bazel_version="3.4.0"
-onednn_version="v1.7"
-extra_args="$extra_args --build-arg tf_id=$tf_version \
-  --build-arg tf_version=$version \
-  --build-arg bazel_version=$bazel_version \
-  --build-arg onednn_version=$onednn_version"
+# Set TensorFlow, bazel version
+tf_version="v2.6.0"
+bazel_version="3.7.2"
+extra_args="$extra_args \
+  --build-arg tf_version=$tf_version \
+  --build-arg bazel_version=$bazel_version"
 
-extra_args="$extra_args --build-arg cpu=$target"
+image_tag="pytorch1.9.0_tensorflow2.6.0"
+
+extra_args="$extra_args --build-arg cpu=$target \
+    --build-arg tune=$target \
+    --build-arg arch=$target \
+    --build-arg blas_cpu= \
+    --build-arg blas_ncores= \
+    --build-arg eigen_l1_cache= \
+    --build-arg eigen_l2_cache= \
+    --build-arg eigen_l3_cache= \
+    --build-arg acl_arch=arm64-v8a \
+    --build-arg image_tag=$image_tag"
 
 echo $extra_args
 
-image_tag="pytorch1.6.0_tensorflow2.3.0$tf_onednn"
-
 if [[ $build_base_image ]]; then
-  # Stage 1: Base image, Ubuntu with core packages and GCC9
+  # Stage 1: Base image, Ubuntu with core packages and GCC
   docker build $extra_args --target deep-learning-base -t deep-learning-base:$image_tag .
 fi
 

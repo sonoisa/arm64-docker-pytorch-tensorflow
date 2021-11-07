@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # *******************************************************************************
-# Copyright 2020 Arm Limited and affiliates.
+# Copyright 2020-2021 Arm Limited and affiliates.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,32 +17,25 @@
 # limitations under the License.
 # *******************************************************************************
 
+
 set -euo pipefail
 
 cd $PACKAGE_DIR
-readonly package=opencv 
+readonly package=opencv
 readonly src_host=https://github.com/opencv
 readonly src_repo=opencv
 readonly num_cpus=$(grep -c ^processor /proc/cpuinfo)
 
-git clone ${src_host}/${src_repo}.git 
-
-cd $PACKAGE_DIR/$package
+git clone ${src_host}/${src_repo}.git
+cd $src_repo
+git checkout 4.4.0 -b 4.4.0
 mkdir -p build
 cd build
+
 export CFLAGS="${BASE_CFLAGS} -O3"
-export LDFLAGS="${BASE_LDFLAGS}"
-
-py_inc=/usr/local/include/python${PY_VERSION:0:3}
-py_bin=$VENV_DIR/bin/python
-py_site_packages=$VENV_DIR/lib64/python${PY_VERSION:0:3}/site-packages/
-install_dir=$VENV_DIR/$package
-
-cmake -DPYTHON3_EXECUTABLE=$py_bin -DPYTHON3_INCLUDE_DIR=$py_inc -DPYTHON3_PACKAGES_PATH=$py_site_packages \
-  -D CMAKE_BUILD_TYPE=Release -D CMAKE_INSTALL_PREFIX=$install_dir ..
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PROD_DIR/$package/install ..
 
 make -j ${NP_MAKE:-$((num_cpus / 2))}
 make install
 
-rm -rf $PACKAGE_DIR/$package
-
+rm -rf $PACKAGE_DIR/${src_repo}

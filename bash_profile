@@ -1,5 +1,5 @@
 # *******************************************************************************
-# Copyright 2020 Arm Limited and affiliates.
+# Copyright 2020-2021 Arm Limited and affiliates.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,7 +26,7 @@ fi
 export EDITOR=vim
 
 # Set prompt
-export MY_PROMPT="aarch64_pytorch"
+export MY_PROMPT="aarch64_deep_learning"
 export MY_COLOUR="\001\e[0;49;36m\002"
 
 PS1="$MY_COLOUR$MY_PROMPT\001\e[m\002 \W> \[\033[00m\]"

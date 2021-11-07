@@ -1,5 +1,5 @@
 # *******************************************************************************
-# Copyright 2020 Arm Limited and affiliates.
+# Copyright 2020-2021 Arm Limited and affiliates.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,8 +20,11 @@
 # ========
 ARG njobs
 ARG bazel_mem
+ARG default_py_version=3.8
 
-FROM ubuntu:18.04 AS deep-learning-base
+FROM ubuntu:20.04 AS deep-learning-base
+ARG default_py_version
+ENV PY_VERSION="${default_py_version}"
 
 RUN if ! [ "$(arch)" = "aarch64" ] ; then exit 1; fi
 
@@ -30,17 +33,28 @@ RUN apt-get -y update && \
     apt-get -y install software-properties-common --no-install-recommends && \
     add-apt-repository ppa:ubuntu-toolchain-r/test && \
     apt-get -y install --no-install-recommends \
+      accountsservice \
+      apport \
+      at \
       autoconf \
       bc \
       build-essential \
       cmake \
+      cpufrequtils \
       curl \
+      ethtool \
       g++-9 \
+      g++-10 \
+      gcc-7 \
       gcc-9 \
+      gcc-10 \
       gettext-base \
       gfortran-9 \
+      gfortran-10 \
       git \
+      iproute2 \
       iputils-ping \
+      lxd \
       libbz2-dev \
       libc++-dev \
       libcgal-dev \
@@ -52,6 +66,7 @@ RUN apt-get -y update && \
       libncurses5-dev \
       libncursesw5-dev \
       libpng-dev \
+      libprotoc-dev \
       libreadline-dev \
       libsox-dev \
       libsox-fmt-all \
@@ -60,17 +75,35 @@ RUN apt-get -y update && \
       libxml2-dev \
       libxslt-dev \
       locales \
+      lsb-release \
+      lvm2 \
       moreutils \
+      net-tools \
+      open-iscsi \
       openjdk-8-jdk \
       openssl \
+      pciutils \
+      pkg-config \
+      policykit-1 \
+      python${PY_VERSION} \
+      python${PY_VERSION}-dev \
+      python${PY_VERSION}-distutils \
+      python${PY_VERSION}-venv \
+      python3-pip \
       python-openssl \
+      protobuf-compiler \
       rsync \
+      rsyslog \
+      snapd \
       scons \
       sox \
       ssh \
       sudo \
       time \
+      udev \
       unzip \
+      ufw \
+      uuid-runtime \
       vim \
       wget \
       xz-utils \
@@ -80,14 +113,16 @@ RUN apt-get -y update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Make gcc 9 the default
-RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 1 --slave /usr/bin/g++ g++ /usr/bin/g++-9 && \
-    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-9 1
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 1 --slave /usr/bin/g++ g++ /usr/bin/g++-10 && \
+    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-10 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
+    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 # DOCKER_USER for the Docker user
 ENV DOCKER_USER=ubuntu
 
 # Setup default user
-RUN useradd --create-home -s /bin/bash -m $DOCKER_USER && echo "$DOCKER_USER:Arm2020" | chpasswd && adduser $DOCKER_USER sudo
+RUN useradd --create-home -s /bin/bash -m $DOCKER_USER && echo "$DOCKER_USER:Portland" | chpasswd && adduser $DOCKER_USER sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
 
@@ -97,34 +132,37 @@ RUN chown $DOCKER_USER:$DOCKER_USER /home/$DOCKER_USER/.bash_profile
 COPY patches/welcome.txt /home/$DOCKER_USER/.
 RUN echo '[ ! -z "$TERM" -a -r /home/$DOCKER_USER/welcome.txt ] && cat /home/$DOCKER_USER/welcome.txt' >> /etc/bash.bashrc
 
+
 # ========
 # Stage 2: augment the base image with some essential libs
 # ========
 FROM deep-learning-base AS deep-learning-libs
 ARG njobs
+ARG cpu
+ARG arch
+ARG blas_cpu
+ARG blas_ncores
+ARG acl_arch
 ARG pt_onednn_opt
 ARG tf_onednn_opt
-ARG onednn_version
-ARG cpu
-ARG tf_id
 
 ENV NP_MAKE="${njobs}" \
-    PT_ONEDNN_BUILD="${pt_onednn_opt}" \
-    TF_ONEDNN_BUILD="${tf_onednn_opt}" \
-    ONEDNN_VERSION="${onednn_version}" \
     CPU="${cpu}" \
-    TF_VERSION_ID="${tf_id}"
+    ARCH="${arch}" \
+    BLAS_CPU="${blas_cpu}" \
+    BLAS_NCORES="${blas_ncores}" \
+    ACL_ARCH="${acl_arch}" \
+    PT_ONEDNN_BUILD="${pt_onednn_opt}" \
+    TF_ONEDNN_BUILD="${tf_onednn_opt}"
 
 # Key version numbers
-ENV PY_VERSION=3.8.7 \
-    ACL_VERSION="v20.08" \
-    ARMPL_VERSION=20.2.1 \
-    OPENBLAS_VERSION=0.3.9 \
+ENV ACL_VERSION="v21.08" \
+    OPENBLAS_VERSION=0.3.10 \
     NINJA_VERSION=1.9.0
 
 # Package build parameters
 ENV PROD_DIR=/opt \
-    PACKAGE_DIR=/packages
+    PACKAGE_DIR=packages
 
 # Make directories to hold package source & build directories (PACKAGE_DIR)
 # and install build directories (PROD_DIR).
@@ -141,25 +179,14 @@ RUN $PACKAGE_DIR/build-arm_opt_routines.sh
 # Common compiler settings
 ENV CC=gcc \
     CXX=g++ \
-    BASE_CFLAGS="-mcpu=${CPU} -moutline-atomics"
-
-# Install Arm Performance Libraries
-COPY scripts/build-armpl.sh $PACKAGE_DIR/.
-RUN $PACKAGE_DIR/build-armpl.sh
-ENV ARMPL_DIR=$PROD_DIR/armpl/armpl_${ARMPL_VERSION}_gcc-9.3
-
-# Common compiler settings for remaining builds
-# this ads arm_opt_routined into the LDFLAGS by default.
-ENV BASE_LDFLAGS="-L$ARMPL_DIR/lib -L$PROD_DIR/arm_opt_routines/lib -lmathlib -lm" \
-    LD_LIBRARY_PATH="$ARMPL_DIR/lib:$PROD_DIR/arm_opt_routines/lib"
-
-COPY scripts/build-cpython.sh $PACKAGE_DIR/.
-RUN $PACKAGE_DIR/build-cpython.sh
+    BASE_CFLAGS="-mcpu=${CPU} -march=${ARCH} -O3" \    
+    BASE_LDFLAGS="-L$PROD_DIR/arm_opt_routines/lib -lmathlib -lm" \
+    LD_LIBRARY_PATH="$PROD_DIR/arm_opt_routines/lib"
 
 # Build OpenBLAS from source
 COPY scripts/build-openblas.sh $PACKAGE_DIR/.
 RUN $PACKAGE_DIR/build-openblas.sh
-ENV OPENBLAS_DIR=$PROD_DIR/openblas/$OPENBLAS_VERSION
+ENV OPENBLAS_DIR=$PROD_DIR/openblas
 ENV LD_LIBRARY_PATH=$OPENBLAS_DIR/lib:$LD_LIBRARY_PATH
 
 # Build Arm Compute Library from source
@@ -172,27 +199,24 @@ COPY scripts/build-ninja.sh $PACKAGE_DIR/.
 RUN $PACKAGE_DIR/build-ninja.sh
 ENV PATH=$PROD_DIR/ninja/$NINJA_VERSION:$PATH
 
-# Build oneDNN from source
-COPY scripts/build-onednn.sh $PACKAGE_DIR/.
-# Patch for oneDNN (MKL-DNN), v0.21.3
-COPY patches/mkldnn.patch $PACKAGE_DIR/mkldnn.patch
-ENV ONEDNN_DIR=$PROD_DIR/onednn/release
-ENV LD_LIBRARY_PATH=$ONEDNN_DIR/lib:$LD_LIBRARY_PATH
-# Get oneDNN sources
-# Built as part of the bazel build step in TensorFlow
-COPY scripts/get-onednn.sh $PACKAGE_DIR/.
-RUN $PACKAGE_DIR/get-onednn.sh
 
 # ========
 # Stage 3: install essential python dependencies into a venv
 # ========
 FROM deep-learning-libs AS deep-learning-tools
 ARG njobs
-ENV NP_MAKE="${njobs}"
+ARG default_py_version
+ARG cpu
+ARG arch
+
+ENV PY_VERSION="${default_py_version}" \
+    NP_MAKE="${njobs}" \
+    CPU="${cpu}" \
+    ARCH="${arch}"
 
 # Key version numbers
-ENV NUMPY_VERSION=1.18.5 \
-    SCIPY_VERSION=1.4.1 \
+ENV NUMPY_VERSION=1.19.5 \
+    SCIPY_VERSION=1.5.2 \
     NPY_DISTUTILS_APPEND_FLAGS=1 \
     OPENCV_VERSION=4.4.0.46
 
@@ -210,7 +234,7 @@ ENV PATH="$VENV_DIR/bin:$PATH"
 
 # Install some basic python packages needed for NumPy
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir "setuptools>=41.0.0" six mock wheel cython
+RUN pip install --no-cache-dir "setuptools>=41.0.0" six mock wheel cython sh
 
 # Build numpy from source, using OpenBLAS for BLAS calls
 COPY scripts/build-numpy.sh $PACKAGE_DIR/.
@@ -218,73 +242,62 @@ COPY patches/site.cfg $PACKAGE_DIR/site.cfg
 RUN $PACKAGE_DIR/build-numpy.sh
 
 # Install some  basic python packages needed for SciPy
-RUN pip install --no-cache-dir pybind11 pyangbind
-# Build numpy from source, using OpenBLAS for BLAS calls
+RUN pip install --no-cache-dir pybind11==2.6.2 pyangbind
+# Build scipy from source, using OpenBLAS for BLAS calls
 COPY scripts/build-scipy.sh $PACKAGE_DIR/.
 COPY patches/site.cfg $PACKAGE_DIR/site.cfg
 RUN $PACKAGE_DIR/build-scipy.sh
 
 # Install some TensorFlow essentials
 RUN pip install --no-cache-dir keras_applications==1.0.8 --no-deps
-RUN pip install --no-cache-dir keras_preprocessing==1.1.0 --no-deps
+RUN pip install --no-cache-dir keras_preprocessing==1.1.2 --no-deps
 
 # Install some more essentials.
-RUN HDF5_DIR=/usr/lib/aarch64-linux-gnu/hdf5/serial pip install --no-cache-dir h5py==2.10.0
+RUN HDF5_DIR=/usr/lib/aarch64-linux-gnu/hdf5/serial pip install --no-cache-dir h5py==3.1.0
 RUN pip install --no-cache-dir grpcio
 RUN pip install --no-cache-dir hypothesis pyyaml pytest
 RUN pip install --no-cache-dir matplotlib
-RUN pip install --no-cache-dir lmdb pillow==6.1
-RUN pip install --no-cache-dir ck absl-py pycocotools 
+RUN pip install --no-cache-dir pillow==8.2.0 lmdb
+RUN pip install --no-cache-dir ck==1.55.5 absl-py pycocotools typing_extensions
 
-# Install OpenCV into our venv,
-# Note: Scripts are provided to build and install OpenCV from the
-# GitHub repository. These are no longer used by default in favour of the
-# opencv-python package, in this case opencv-python-headless.
-# Uncomment code block '1' below, and comment out code block '2' to build
-# from the GitHub sources.
-# --
-# 1 - build from GitHub sources:
-#COPY scripts/build-opencv.sh $PACKAGE_DIR/.
-#RUN $PACKAGE_DIR/build-opencv.sh
-# --
-# 2 - install opencv-python-headless
 RUN pip install --no-cache-dir scikit-build
-# enum34 is not compatable with Python 3.6+, and not required
-# it is installed as a dependency for an earlier package and needs
-# to be removed in order for the OpenCV build to complete.
 RUN pip uninstall enum34 -y
-RUN pip install --no-cache-dir --no-binary :all: opencv-python-headless==${OPENCV_VERSION}
+RUN pip install --no-cache-dir opencv-python-headless==${OPENCV_VERSION}
 
 CMD ["bash", "-l"]
+
 
 # ========
 # Stage 4: build TensorFlow and PyTorch
 # ========
 FROM deep-learning-libs AS deep-learning-dev
 ARG njobs
+ARG default_py_version
+ARG cpu
+ARG arch
 ARG bazel_mem
 ARG pt_onednn_opt
 ARG tf_onednn_opt
 ARG tf_version
-ARG tf_id
 ARG bazel_version
-
+ARG eigen_l1_cache
+ARG eigen_l2_cache
+ARG eigen_l3_cache
 
 ENV PT_ONEDNN_BUILD="${pt_onednn_opt}" \
     TF_ONEDNN_BUILD="${tf_onednn_opt}" \
     BZL_RAM="${bazel_mem}" \
-    NP_MAKE="${njobs}"
+    NP_MAKE="${njobs}" \
+    CPU="${cpu}" \
+    ARCH="${arch}" \
+    EIGEN_L1_CACHE="${eigen_l1_cache}" \
+    EIGEN_L2_CACHE="${eigen_l2_cache}" \
+    EIGEN_L3_CACHE="${eigen_l3_cache}"
 
 # Key version numbers
-ENV BZL_VERSION="${bazel_version}" \
-    TF_VERSION="${tf_version}" \
-    TF_VERSION_ID="${tf_id}"
-
-# Key version numbers
-ENV TORCH_VERSION=1.6.0
-ENV TORCH_VISION_VERSION=v0.7.0
-ENV TORCH_TEXT_VERSION=v0.7.0-rc3
-ENV TORCH_AUDIO_VERSION=v0.6.0
+ENV PY_VERSION="${default_py_version}" \
+    BZL_VERSION="${bazel_version}" \
+    TF_VERSION="${tf_version}"
 
 # Use a PACKAGE_DIR in userspace
 WORKDIR /home/$DOCKER_USER
@@ -297,39 +310,57 @@ ENV VENV_DIR=/home/$DOCKER_USER/python3-venv
 COPY --chown=$DOCKER_USER:$DOCKER_USER --from=deep-learning-tools $VENV_DIR /home/$DOCKER_USER/python3-venv
 ENV PATH="$VENV_DIR/bin:$PATH"
 
-# Build PyTorch
-COPY scripts/build-pytorch.sh $PACKAGE_DIR/.
-COPY patches/pytorch_onednn.patch $PACKAGE_DIR/.
-COPY patches/onednn_acl_verbose.patch $PACKAGE_DIR/.
-RUN $PACKAGE_DIR/build-pytorch.sh
-
-RUN pip install --no-cache-dir git+https://github.com/pytorch/text@$TORCH_TEXT_VERSION
-RUN pip install --no-cache-dir git+https://github.com/pytorch/vision@$TORCH_VISION_VERSION
-RUN pip install --no-cache-dir git+https://github.com/pytorch/audio@$TORCH_AUDIO_VERSION
-
-# Build Bazel
-COPY scripts/build-bazel.sh $PACKAGE_DIR/.
-RUN $PACKAGE_DIR/build-bazel.sh
-ENV PATH=$PACKAGE_DIR/bazel/output:$PATH
+# Get Bazel binary for AArch64
+COPY scripts/get-bazel.sh $PACKAGE_DIR/.
+RUN $PACKAGE_DIR/get-bazel.sh
+ENV PATH=$PACKAGE_DIR/bazel:$PATH
 
 # Build TensorFlow
+COPY patches/eigen_workspace.patch $PACKAGE_DIR/.
+COPY patches/eigen_gebp_cache.patch  $PACKAGE_DIR/.
+COPY patches/tf_acl.patch $PACKAGE_DIR/.
 COPY scripts/build-tensorflow.sh $PACKAGE_DIR/.
-COPY patches/tf_dnnl_decoupling.patch $PACKAGE_DIR/tf_dnnl_decoupling.patch
-COPY patches/tf2_onednn_decoupling.patch $PACKAGE_DIR/tf2_onednn_decoupling.patch
-COPY patches/tensorflow.patch $PACKAGE_DIR/tensorflow.patch
-COPY patches/tensorflow2.patch $PACKAGE_DIR/tensorflow2.patch
-# Patches to resolve intel binary blob dependencies for TensorFlow 2.x - oneDNN 1.x builds
-COPY patches/oneDNN-opensource.patch $PACKAGE_DIR/oneDNN-opensource.patch
-# Patches to support different flavours of oneDNN
-COPY patches/tf2-armpl.patch $PACKAGE_DIR/tf2-armpl.patch
-COPY patches/tf2-openblas.patch $PACKAGE_DIR/tf2-openblas.patch
+COPY patches/TF-caching.patch $PACKAGE_DIR/.
 RUN $PACKAGE_DIR/build-tensorflow.sh
+
+# Downgrade keras, tensorflow-estimator and tensorboard for tensorflow 2.6.0
+RUN pip uninstall -y \
+        keras \
+        tensorflow-estimator \
+        tensorboard && \
+    pip install --no-cache-dir --no-deps \
+        keras==2.6.0 \
+        tensorflow-estimator==2.6.0
+RUN pip install --no-cache-dir \
+        tensorboard==2.6.0
 
 # Build tensorflow-text
 COPY scripts/build-tensorflow-text.sh $PACKAGE_DIR/.
 RUN $PACKAGE_DIR/build-tensorflow-text.sh
 
-RUN rm -rf $PACKAGE_DIR/bazel
+# Key version numbers
+ENV TORCH_VERSION="1.9.0" \
+    ONEDNN_VERSION="v2.4" \
+    TORCH_VISION_VERSION="v0.9.1" \
+    TORCH_TEXT_VERSION="0.10.0" \
+    TORCH_AUDIO_VERSION="0.9.0"
+
+# Build PyTorch
+COPY scripts/build-pytorch.sh $PACKAGE_DIR/.
+COPY patches/pocketfft_full.patch $PACKAGE_DIR/.
+RUN $PACKAGE_DIR/build-pytorch.sh
+
+# Build torchvision
+RUN pip install --no-cache-dir git+https://github.com/pytorch/vision@$TORCH_VISION_VERSION
+
+# Build torchtext
+ENV VENV_PACKAGE_DIR=$VENV_DIR/lib/python$PY_VERSION/site-packages
+COPY scripts/build-torchtext.sh $PACKAGE_DIR/.
+RUN $PACKAGE_DIR/build-torchtext.sh
+
+# Build torchaudio
+COPY scripts/build-torchaudio.sh $PACKAGE_DIR/.
+RUN $PACKAGE_DIR/build-torchaudio.sh
 
 CMD ["bash", "-l"]
 
@@ -348,6 +379,10 @@ ENV VENV_DIR=/home/$DOCKER_USER/python3-venv
 COPY --chown=$DOCKER_USER:$DOCKER_USER --from=deep-learning-dev $VENV_DIR /home/$DOCKER_USER/python3-venv
 ENV PATH="$VENV_DIR/bin:$PATH"
 
+# Install Rust into user-space, needed for transformers dependencies
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/home/$DOCKER_USER/.cargo/bin:${PATH}"
+
 CMD ["bash", "-l"]
 
 
@@ -359,22 +394,68 @@ ARG njobs
 
 WORKDIR /home/$DOCKER_USER
 USER $DOCKER_USER
+ENV PACKAGE_DIR=/home/$DOCKER_USER/package
+ENV PROD_DIR=/opt
+RUN mkdir -p $PACKAGE_DIR
 
-# Clone Tensorflow benchmarks
-COPY scripts/build-benchmarks.sh /home/$DOCKER_USER/.
-RUN /home/$DOCKER_USER/build-benchmarks.sh
+# Build and install OpenCV from GitHub sources (needed for C++ API examples)
+COPY scripts/build-opencv.sh $PACKAGE_DIR/.
+RUN sudo -E $PACKAGE_DIR/build-opencv.sh
+ENV LD_LIBRARY_PATH=$PROD_DIR/opencv/install/lib:$LD_LIBRARY_PATH
 
-COPY patches/optional-mlcommons-changes.patch /home/$DOCKER_USER/optional-mlcommons-changes.patch
-# Clone and install  MLCommons (MLPerf)
-COPY scripts/build-mlcommons.sh /home/$DOCKER_USER/.
-RUN /home/$DOCKER_USER/build-mlcommons.sh
+# Build and install yaml-cpp from Github source (needed for C++ API examples)
+ENV YAML_VERSION=yaml-cpp-0.7.0
+COPY scripts/build-yamlcpp.sh $PACKAGE_DIR/.
+RUN sudo -E $PACKAGE_DIR/build-yamlcpp.sh
+
+ENV LD_LIBRARY_PATH=$VENV_DIR/tensorflow/lib:$LD_LIBRARY_PATH
+
+# Examples, benchmarks, and associated 'helper' scripts will be installed
+# in $EXAMPLE_DIR.
+ENV EXAMPLE_DIR=/home/$DOCKER_USER/examples
+ENV MLCOMMONS_DIR=$EXAMPLE_DIR/MLCommons
+RUN mkdir -p $EXAMPLE_DIR
+RUN mkdir -p $MLCOMMONS_DIR
+ADD examples $EXAMPLE_DIR
+
+# Install missing Python package dependencies required to run examples
+RUN pip install --no-cache-dir transformers pandas
+RUN pip install --no-cache-dir pyyaml
+RUN pip install --no-cache-dir requests
+RUN pip install --no-cache-dir tqdm
+RUN pip install --no-cache-dir boto3
+RUN pip install --no-cache-dir future onnx==1.8.1
+RUN pip install --no-cache-dir iopath
+
+# Clone TensorFlow benchmarks into EXAMPLE_DIR.
+COPY scripts/build-benchmarks.sh $EXAMPLE_DIR/.
+RUN $EXAMPLE_DIR/build-benchmarks.sh
+RUN rm -f $EXAMPLE_DIR/build-benchmarks.sh
+
+# Clone and install MLCommons (MLPerf)
+COPY patches/optional-mlcommons-changes.patch $MLCOMMONS_DIR/optional-mlcommons-changes.patch
+COPY scripts/build-mlcommons.sh $MLCOMMONS_DIR/.
+COPY patches/mlcommons_bert.patch $MLCOMMONS_DIR/.
+COPY patches/pytorch_native.patch $MLCOMMONS_DIR/.
+RUN $MLCOMMONS_DIR/build-mlcommons.sh
+RUN rm -f $MLCOMMONS_DIR/build-mlcommons.sh
 
 # Copy scripts to download dataset and models
-COPY scripts/download-dataset.sh /home/$DOCKER_USER/.
-COPY scripts/download-model.sh /home/$DOCKER_USER/.
+COPY scripts/download-dataset.sh $MLCOMMONS_DIR/.
+COPY scripts/download-model.sh $MLCOMMONS_DIR/.
 
-# Clone PyTorch examples
-# NOTE: these examples are included as a startiing point
-RUN  git clone https://github.com/pytorch/examples.git
+# MLCommons ServerMode
+COPY patches/Makefile.patch $MLCOMMONS_DIR/.
+COPY patches/servermode.patch $MLCOMMONS_DIR/.
+COPY scripts/build-boost.sh $MLCOMMONS_DIR/.
+COPY scripts/build-loadgen-integration.sh $MLCOMMONS_DIR/.
+
+# Copy scripts to download dataset and models
+COPY scripts/download-dataset.sh $MLCOMMONS_DIR/.
+COPY scripts/download-model.sh $MLCOMMONS_DIR/.
+COPY scripts/setup-servermode.sh $MLCOMMONS_DIR/.
+
+# Copy examples
+COPY --chown=$DOCKER_USER:$DOCKER_USER examples $EXAMPLE_DIR
 
 CMD ["bash", "-l"]

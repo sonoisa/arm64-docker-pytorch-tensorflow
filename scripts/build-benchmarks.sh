@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # *******************************************************************************
-# Copyright 2020 Arm Limited and affiliates.
+# Copyright 2020-2021 Arm Limited and affiliates.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,19 +20,10 @@
 
 set -euo pipefail
 
-cd /home/$DOCKER_USER
+cd $EXAMPLE_DIR
 readonly package=benchmarks
 readonly src_host=https://github.com/tensorflow
 readonly src_repo=benchmarks
-
-if [[ $tf_id == '1' ]]; then
-  src_branch=cnn_tf_v1.15_compatible
-elif [[ $tf_id == '2' ]]; then
-  src_branch=cnn_tf_v2.1_compatible
-else
-  echo 'Invalid TensorFlow version when installing benchmarks'
-  exit 1
-fi
-
+src_branch=cnn_tf_v2.1_compatible
 # Clone tensorflow and benchmarks
 git clone -b ${src_branch} ${src_host}/${src_repo}.git
