@@ -1,5 +1,5 @@
 # *******************************************************************************
-# Copyright 2021 Arm Limited and affiliates.
+# Copyright 2021-2022 Arm Limited and affiliates.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -40,7 +40,7 @@ def main():
     squadid = ""
 
     if args:
-        if "source" in args:
+        if "text" in args:
             if args["text"]:
                 source = args["text"]
         if "subject" in args:
@@ -123,15 +123,20 @@ def main():
         question = squad_records["question"].iloc[i_record]
         answer = squad_records["answer"].iloc[i_record]
 
-    # DilstilBERT question answering using pre-trained model.
+    # DistilBERT question answering using pre-trained model.
     token = DistilBertTokenizer.from_pretrained(
         "distilbert-base-uncased", return_token_type_ids=True
     )
+
     model = TFDistilBertForQuestionAnswering.from_pretrained(
         "distilbert-base-uncased-distilled-squad"
     )
 
-    encoding = token.encode_plus(question, context)
+    encoding = token.encode_plus(
+        question,
+        context,
+        max_length=512, truncation=True
+    )
 
     input_ids, attention_mask = (
         encoding["input_ids"],

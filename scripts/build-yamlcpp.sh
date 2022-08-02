@@ -28,10 +28,12 @@ readonly src_repo=yaml-cpp
 
 git clone ${src_host}/${src_repo}.git
 cd $src_repo
-git checkout $version -b $version
+git checkout $version
 mkdir -p build
 cd build
 
 export CFLAGS="${BASE_CFLAGS} -O3"
 cmake ..
 make -j
+
+

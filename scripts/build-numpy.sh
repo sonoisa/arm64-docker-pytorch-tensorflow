@@ -42,4 +42,4 @@ export LDFLAGS="${BASE_LDFLAGS}"
 
 python setup.py install
 
-rm -rf $PACKAGE_DIR/${src_repo}
+rm -rf $PACKAGE_DIR/$src_repo

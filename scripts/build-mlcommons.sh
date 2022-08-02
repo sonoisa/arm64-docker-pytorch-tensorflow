@@ -22,7 +22,7 @@ set -euo pipefail
 source python3-venv/bin/activate
 ck pull repo:ck-env
 sudo apt-get -y install protobuf-compiler libprotoc-dev
-cd $MLCOMMONS_DIR
+cd $EXAMPLE_DIR/MLCommons
 git clone https://github.com/mlcommons/inference.git --recursive
 cd inference
 git checkout r0.7
@@ -30,6 +30,7 @@ git checkout r0.7
 patch -p1 < $MLCOMMONS_DIR/pytorch_native.patch
 rm $MLCOMMONS_DIR/pytorch_native.patch
 
+# Scripts to support running of MLPerf in different modes. Refer to README.md for details.
 patch -p1 < $MLCOMMONS_DIR/optional-mlcommons-changes.patch
 
 git checkout v1.0.1 -- language/bert
@@ -40,8 +41,13 @@ rm $MLCOMMONS_DIR/mlcommons_bert.patch
 cd loadgen
 CFLAGS="-std=c++14" python setup.py develop
 
+# patch RNNT
+cd $MLCOMMONS_DIR/inference/
+patch -p1 < $MLCOMMONS_DIR/mlcommons_rnnt.patch
+rm $MLCOMMONS_DIR/mlcommons_rnnt.patch
+
 # Build image classification and object detection benchmarks
-cd ../vision/classification_and_detection
+cd $MLCOMMONS_DIR/inference/vision/classification_and_detection
 python setup.py develop
 # view method generates a runtime error where tensor is not
 # contigious in memory. Using reshape avoids this.

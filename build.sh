@@ -52,6 +52,13 @@ function print_usage_and_exit {
 
 ################################################################################
 
+cpu="native"
+tune="native"
+arch="native"
+blas_cpu=
+blas_ncores=
+acl_arch="arm64-v8a"
+
 # Enable Buildkit
 # Required for advanced multi-stage builds
 # Requires Docker v 18.09.1
@@ -78,12 +85,12 @@ fi
 extra_args=""
 nproc_build=
 bazel_mem="2048"
-pt_onednn="acl"
-tf_onednn="acl"
-pt_onednn_blas="acl"
-tf_onednn_blas="acl"
+enable_onednn=0
+pt_onednn=
+tf_onednn=
 target="native"
 clean_build=
+xla=
 
 while [ $# -gt 0 ]
 do
@@ -165,35 +172,48 @@ do
       ;;
 
     --pt_onednn )
-      case $2 in
-        reference )
-          pt_onednn="reference"
-          shift
-        ;;
-        acl )
-          pt_onednn="acl"
-          shift
-        ;;
-        * )
-          pt_onednn=$pt_onednn_blas
-          ;;
-      esac
+      if [[ $# -gt 1 ]]; then
+        case $2 in
+          reference )
+            pt_onednn="reference"
+            shift
+            ;;
+          acl )
+            pt_onednn="acl"
+            shift
+            ;;
+          * )
+            echo "Defaulting to oneDNN-ACL build."
+            echo "Note: support for oneDNN builds with OpenBLAS or ArmPL is now deprecated."
+            pt_onednn="acl"
+            ;;
+        esac
+      else
+        pt_onednn="acl"
+      fi
       ;;
 
     --tf_onednn )
-      case $2 in
-        reference )
-          tf_onednn="reference"
-          shift
-          ;;
-        acl )
-          tf_onednn="acl"
-          shift
-          ;;
-        * )
-          tf_onednn=$tf_onednn_blas
-          ;;
-      esac
+      enable_onednn=1
+      if [[ $# -gt 1 ]]; then
+        case $2 in
+          reference )
+            tf_onednn="reference"
+            shift
+            ;;
+          acl )
+            tf_onednn="acl"
+            shift
+            ;;
+          * )
+            echo "Defaulting to oneDNN-ACL build."
+            echo "Note: support for oneDNN builds with OpenBLAS or ArmPL is now deprecated."
+            tf_onednn="acl"
+            ;;
+        esac
+      else
+        tf_onednn="acl"
+      fi
       ;;
 
     --clean )
@@ -228,7 +248,7 @@ fi
 
 # Add oneDNN build options
 if [[ $tf_onednn ]]; then
-  extra_args="--build-arg tf_onednn_opt=$tf_onednn $extra_args"
+  extra_args="--build-arg tf_onednn_opt=$tf_onednn $extra_args --build-arg enable_onednn=$enable_onednn"
 fi
 
 if [[ $clean_build ]]; then
@@ -236,24 +256,29 @@ if [[ $clean_build ]]; then
   extra_args="--pull --no-cache $extra_args"
 fi
 
-# Set TensorFlow, bazel version
-tf_version="v2.6.0"
-bazel_version="3.7.2"
+if [[ $xla ]]; then
+  # Build xla backend
+  extra_args="--build-arg build_xla=$xla $extra_args"
+fi
+
+# Set TensorFlow
+tf_version="v2.9.1"
+tfserving_version="2.7.0"
 extra_args="$extra_args \
   --build-arg tf_version=$tf_version \
-  --build-arg bazel_version=$bazel_version"
+  --build-arg tfserving_version=$tfserving_version"
 
-image_tag="pytorch1.9.0_tensorflow2.6.0"
+image_tag="pytorch1.12.0_tensorflow2.9.1"
 
-extra_args="$extra_args --build-arg cpu=$target \
-    --build-arg tune=$target \
-    --build-arg arch=$target \
-    --build-arg blas_cpu= \
-    --build-arg blas_ncores= \
+extra_args="$extra_args --build-arg cpu=$cpu \
+    --build-arg tune=$tune \
+    --build-arg arch=$arch \
+    --build-arg blas_cpu=$blas_cpu \
+    --build-arg blas_ncores=$blas_ncores \
     --build-arg eigen_l1_cache= \
     --build-arg eigen_l2_cache= \
     --build-arg eigen_l3_cache= \
-    --build-arg acl_arch=arm64-v8a \
+    --build-arg acl_arch=$acl_arch \
     --build-arg image_tag=$image_tag"
 
 echo $extra_args

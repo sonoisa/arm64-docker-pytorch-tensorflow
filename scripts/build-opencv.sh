@@ -28,7 +28,7 @@ readonly num_cpus=$(grep -c ^processor /proc/cpuinfo)
 
 git clone ${src_host}/${src_repo}.git
 cd $src_repo
-git checkout 4.4.0 -b 4.4.0
+git checkout 4.6.0 -b 4.6.0
 mkdir -p build
 cd build
 

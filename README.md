@@ -1,10 +1,10 @@
 # arm64-docker-pytorch-tensorflow
 
-Dockerfile of a Deep Learning development environment with PyTorch and Tensorflow for arm64 architecture, especially Applie Silicon (M1) Macs.
+Dockerfile of a Deep Learning development environment with PyTorch and Tensorflow for arm64 architecture, especially Applie Silicon (M1+) Macs.
 
 * Docker image: https://hub.docker.com/r/sonoisa/deep-learning-coding
     * ```docker pull sonoisa/deep-learning-coding:pytorch1.6.0_tensorflow2.3.0```
-    * ```docker pull sonoisa/deep-learning-coding:pytorch1.9.0_tensorflow2.6.0```
+    * ```docker pull sonoisa/deep-learning-coding:pytorch1.12.0_tensorflow2.9.1```
 
 This Dockerfile is a merged version of the Dockerfile for PyTorch and the Dockerfile for TensorFlow described in the following site.
 https://community.arm.com/developer/tools-software/tools/b/tools-software-ides-blog/posts/aarch64-docker-images-for-pytorch-and-tensorflow

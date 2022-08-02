@@ -26,6 +26,7 @@ readonly version=$BZL_VERSION
 mkdir -p $PACKAGE_DIR/$package
 cd $PACKAGE_DIR/$package
 
+echo "BAZEL version: $version"
 wget https://github.com/bazelbuild/bazel/releases/download/$version/bazel-$version-linux-arm64
 mv bazel-$version-linux-arm64 bazel
 chmod a+x bazel

@@ -40,4 +40,4 @@ install_dir=$PROD_DIR/$package/$version
 mkdir -p $install_dir
 cp ./ninja $install_dir/.
 
-rm -rf $PACKAGE_DIR/${src_repo}
+rm -rf $PACKAGE_DIR/$src_repo

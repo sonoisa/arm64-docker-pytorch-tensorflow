@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # *******************************************************************************
-# Copyright 2020-2021 Arm Limited and affiliates.
+# Copyright 2020-2022 Arm Limited and affiliates.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,16 +28,14 @@ readonly src_repo=tensorflow
 # Clone tensorflow and benchmarks
 git clone ${src_host}/${src_repo}.git
 cd ${src_repo}
-git checkout $version -b $version
-git submodule sync
-git submodule update --init --recursive
+git checkout $version
 
 # Env vars used to avoid interactive elements of the build.
 export HOST_C_COMPILER=(which gcc)
 export HOST_CXX_COMPILER=(which g++)
 export PYTHON_BIN_PATH=(which python)
 export USE_DEFAULT_PYTHON_LIB_PATH=1
-export TF_ENABLE_XLA=0
+export TF_ENABLE_XLA=1
 export TF_DOWNLOAD_CLANG=0
 export TF_SET_ANDROID_WORKSPACE=0
 export TF_NEED_MPI=0
@@ -59,66 +57,108 @@ export TF_NEED_TENSORRT=0
 
 ./configure
 
-host_args=""
-extra_args="--verbose_failures -s"
-if [[ $BZL_RAM ]]; then extra_args="$extra_args --local_ram_resources=$BZL_RAM"; fi
-if [[ $BZL_RAM ]]; then host_args="--host_jvm_args=-Xmx${BZL_RAM}m --host_jvm_args=-Xms${BZL_RAM}m"; fi
-if [[ $NP_MAKE ]]; then extra_args="$extra_args --jobs=$NP_MAKE"; fi
+# Bazel build options
+config_flags=""
+compile_flags="--copt=-mtune=${TUNE} --copt=-march=${ARCH} --copt=-O3 --copt=-flax-vector-conversions"
+link_flags="--linkopt=-lgomp"
+extra_flags="--verbose_failures -s"
+
+if [[ $BZL_RAM ]]; then extra_flags="$extra_flags --local_ram_resources=$BZL_RAM"; fi
+if [[ $NP_MAKE ]]; then extra_flags="$extra_flags --jobs=$NP_MAKE"; fi
 
 if [[ $TF_ONEDNN_BUILD ]]; then
     echo "$TF_ONEDNN_BUILD build for $TF_VERSION"
-    extra_args="$extra_args --config=mkl_aarch64 --linkopt=-fopenmp"
+    if [[ $TF_ONEDNN_BUILD == 'acl_threadpool' ]]; then
+        config_flags="$config_flags --config=mkl_aarch64_threadpool"
+    else
+        config_flags="$config_flags --config=mkl_aarch64"
+    fi
     if [[ $TF_ONEDNN_BUILD == 'reference' ]]; then
-      echo "TensorFlow $TF_VERSION with oneDNN backend - reference build."
-      sed -i '/DNNL_AARCH64_USE_ACL/d' ./third_party/mkl_dnn/mkldnn_acl.BUILD
-    elif [[ $TF_ONEDNN_BUILD == 'acl' ]]; then
-      echo "TensorFlow $TF_VERSION with oneDNN backend - Compute Library build."
-      # Update Bazel build to include onednn_acl_primitives patch
-      patch -p1 < ../tf_acl.patch
-      # Patch TensorFlow to support caching of inner_product primitive
-      patch -p1 < ../TF-caching.patch
+        tf_backend_desc="oneDNN - reference."
+        sed -i '/DNNL_AARCH64_USE_ACL/d' ./third_party/mkl_dnn/mkldnn_acl.BUILD
+    else
+        if [[ $TF_ONEDNN_BUILD == 'acl_threadpool' ]]; then
+            tf_backend_desc="oneDNN + Compute Library (threadpool runtime)."
+        else
+            tf_backend_desc="oneDNN + Compute Library (OpenMP runtime)."
+        fi
+
+        ## Apply patches to the TensorFlow, Compute Library and oneDNN builds
+        # Patches from upstream PRs to address a number of issues exposed by TF unit tests.
+        # tf_test_fix_prs lists the upstream PRs from which to take patches.
+        readonly tf_test_fix_prs="56150 56218 56219 56086 56371"
+        for pr in ${tf_test_fix_prs}; do
+            echo "Patching from upstream PR https://github.com/tensorflow/tensorflow/pull/${pr}."
+            wget https://github.com/tensorflow/tensorflow/pull/${pr}.patch -O ../tf_test_fix-${pr}.patch
+            patch -p1 < ../tf_test_fix-${pr}.patch
+        done
+
+        # Patch Compute Library Bazel build
+        patch -p1 < ../tf_acl.patch
+
+        # Patch to add experimental spin-wait scheduler to Compute Library
+        # Note: overwrites upstream version
+        mv ../compute_library.patch ./third_party/compute_library/.
+
+        # Patch for oneDNN to cap the number of ACL threads to less than the number of available cores.
+        # This reduces the impact of resource contention.
+        mv ../onednn_acl_threadcap.patch ./third_party/mkl_dnn/.
+
+        # Patch for oneDNN to add ACL-based pooling primitive
+        # Based on: https://github.com/oneapi-src/oneDNN/pull/1387
+        mv ../onednn_acl_pooling.patch ./third_party/mkl_dnn/.
+
+        # Patch to add improved support for ACL based postops
+        # Based on: https://github.com/oneapi-src/oneDNN/pull/1389
+        mv ../onednn_acl_postops.patch ./third_party/mkl_dnn/.
     fi
 else
-    echo "TensorFlow $TF_VERSION with Eigen backend."
-    extra_args="$extra_args --define tensorflow_mkldnn_contraction_kernel=0"
-
-    # Patch Eigen to fix minor issue when setting L3 cache
-    patch -p1 < ../eigen_workspace.patch
-    mv ../eigen_gebp_cache.patch ./third_party/eigen3/.
+    tf_backend_desc="Eigen."
+    config_flags="$config_flags --define tensorflow_mkldnn_contraction_kernel=0"
 
     # Manually set L1,2,3 caches sizes for the GEBP kernel in Eigen.
-    [[ $EIGEN_L1_CACHE ]] && extra_args="$extra_args \
-      --cxxopt=-DEIGEN_DEFAULT_L1_CACHE_SIZE=${EIGEN_L1_CACHE} \
-      --copt=-DEIGEN_DEFAULT_L1_CACHE_SIZE=${EIGEN_L1_CACHE}"
-    [[ $EIGEN_L2_CACHE ]] && extra_args="$extra_args \
-      --cxxopt=-DEIGEN_DEFAULT_L2_CACHE_SIZE=${EIGEN_L2_CACHE} \
-      --copt=-DEIGEN_DEFAULT_L2_CACHE_SIZE=${EIGEN_L2_CACHE}"
-    [[ $EIGEN_L3_CACHE ]] && extra_args="$extra_args \
-      --cxxopt=-DEIGEN_DEFAULT_L3_CACHE_SIZE=${EIGEN_L3_CACHE} \
-      --copt=-DEIGEN_DEFAULT_L3_CACHE_SIZE=${EIGEN_L3_CACHE}"
+    [[ $EIGEN_L1_CACHE ]] && compile_flags="$compile_flags \
+        --copt=-DEIGEN_DEFAULT_L1_CACHE_SIZE=${EIGEN_L1_CACHE}"
+    [[ $EIGEN_L2_CACHE ]] && compile_flags="$compile_flags \
+        --copt=-DEIGEN_DEFAULT_L2_CACHE_SIZE=${EIGEN_L2_CACHE}"
+    [[ $EIGEN_L3_CACHE ]] && compile_flags="$compile_flags \
+        --copt=-DEIGEN_DEFAULT_L3_CACHE_SIZE=${EIGEN_L3_CACHE}"
 fi
 
+echo "========================================================================"
+echo " TensorFlow $TF_VERSION with backend: $tf_backend_desc"
+echo "------------------------------------------------------------------------"
+echo " build options:"
+echo " - config_flags= $config_flags"
+echo " - compile_flags= $compile_flags"
+echo " - link_flags= $link_flags"
+echo " - extra_flags= $extra_flags"
+echo "========================================================================"
+
 # Build the tensorflow configuration
-bazel $host_args build $extra_args \
-        --config=v2 --config=noaws \
-        --copt="-mcpu=${CPU}" --copt="-march=${ARCH}" --copt="-O3"  --copt="-fopenmp" \
-        --cxxopt="-mcpu=${CPU}" --cxxopt="-march=${ARCH}" --cxxopt="-O3"  --cxxopt="-fopenmp" \
-        --linkopt="-lgomp  -lm" \
-        //tensorflow/tools/pip_package:build_pip_package \
-        //tensorflow:libtensorflow_cc.so \
-        //tensorflow:install_headers
+bazel build $config_flags \
+    $compile_flags \
+    $link_flags \
+    $extra_flags \
+    //tensorflow/tools/pip_package:build_pip_package \
+    //tensorflow:libtensorflow_cc.so \
+    //tensorflow:install_headers
 
 # Install Tensorflow python package via pip
 ./bazel-bin/tensorflow/tools/pip_package/build_pip_package ./wheel-TF$TF_VERSION-py$PY_VERSION-$CC
 pip install $(ls -tr wheel-TF$TF_VERSION-py$PY_VERSION-$CC/*.whl | tail)
 
 # Install Tensorflow C++ interface
-mkdir -p $VENV_DIR/$package/lib
-mkdir -p $VENV_DIR/$package/include
-cp ./bazel-bin/tensorflow/libtensorflow* $VENV_DIR/$package/lib
-cp -r ./bazel-bin/tensorflow/include $VENV_DIR/$package/
-cp -r $VENV_DIR/lib/python$PY_VERSION/site-packages/tensorflow/include/google \
-      $VENV_DIR/$package/include
+mkdir -p $VIRTUAL_ENV/$package/lib
+mkdir -p $VIRTUAL_ENV/$package/include
+cp ./bazel-bin/tensorflow/libtensorflow* $VIRTUAL_ENV/$package/lib
+cp -r ./bazel-bin/tensorflow/include $VIRTUAL_ENV/$package/
+cp -r $VIRTUAL_ENV/lib/python$PY_VERSION/site-packages/tensorflow/include/google \
+      $VIRTUAL_ENV/$package/include
+
+# Move whl into venv for easy extraction from container
+mkdir -p $VIRTUAL_ENV/$package/wheel
+mv $(ls -tr wheel-TF$TF_VERSION-py$PY_VERSION-$CC/*.whl | tail) $VIRTUAL_ENV/$package/wheel
 
 # Check the Python installation was sucessfull
 cd $HOME
@@ -129,5 +169,3 @@ else
     exit 1
 fi
 rm $HOME/version.log
-
-rm -rf $PACKAGE_DIR/${src_repo}

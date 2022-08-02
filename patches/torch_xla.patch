@@ -1,7 +1,5 @@
-#!/usr/bin/env bash
-
 # *******************************************************************************
-# Copyright 2021 Arm Limited and affiliates.
+# Copyright 2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,27 +14,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # *******************************************************************************
+diff --git a/build_torch_xla_libs.sh b/build_torch_xla_libs.sh
+index 82b70559..d0313150 100755
+--- a/build_torch_xla_libs.sh
++++ b/build_torch_xla_libs.sh
+@@ -66,6 +66,10 @@ if [[ "$XLA_CUDA" == "1" ]]; then
+   OPTS+=(--config=cuda)
+ fi
+ 
++if [[ "$XLA_CPU_USE_ACL" == "1" ]]; then
++  OPTS+=("--define=build_with_acl=true")
++fi
++
+ if [ "$CMD" == "clean" ]; then
+   pushd $THIRD_PARTY_DIR/tensorflow
+   bazel clean
 
-set -euo pipefail
-
-source $HOME/python3-venv/bin/activate
-cd $PACKAGE_DIR
-readonly package=torchaudio
-readonly version=$TORCH_AUDIO_VERSION
-readonly src_host=https://github.com/pytorch
-readonly src_repo=audio
-
-# Clone TorchAudio
-git clone ${src_host}/${src_repo}.git ${package}
-cd ${package}
-git checkout v$version -b v$version
-git submodule sync
-git submodule update --init --recursive
-
-# Copy pybind11 header files into torchaudio
-cp -r $VENV_PACKAGE_DIR/pybind11/include/pybind11 .
-
-# Run Python build script
-python setup.py clean install
-
-rm -rf $PACKAGE_DIR/${src_repo}

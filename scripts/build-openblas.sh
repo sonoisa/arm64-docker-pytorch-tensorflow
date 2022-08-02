@@ -39,4 +39,4 @@ extra_args="USE_OPENMP=1"
 make -j $NP_MAKE $extra_args
 make -j $NP_MAKE $extra_args PREFIX=$install_dir install
 
-rm -rf $PACKAGE_DIR/${src_repo}
+rm -rf $PACKAGE_DIR/$src_repo
